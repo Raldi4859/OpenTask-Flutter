@@ -8,7 +8,7 @@ const app = express();
 const port = 3000;
 
 const connection = mysql.createConnection({
-  host: 'localhost',
+  host: '127.0.0.1',
   port: 3307,
   user: 'root',
   password: '',
@@ -26,6 +26,8 @@ connection.connect((err) => {
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 app.use(fileUpload());
+
+let tasks = [];
 
 // Set headers to allow cross-origin requests
 app.use((req, res, next) => {
@@ -126,14 +128,14 @@ app.get('/', (req, res) => {
     });
   });
 
-app.post('/api/tasks', (req, res) => {
-    const { title, description, date, file } = req.body;
+  app.post('/api/tasks', (req, res) => {
+    const { name, description, due_date, filename } = req.body;
   
     const insertTaskQuery =
-      'INSERT INTO tasks (title, description, date, file) VALUES (?, ?, ?, ?)';
+      'INSERT INTO tasks (name, description, due_date, filename) VALUES (?, ?, ?, ?)';
     connection.query(
       insertTaskQuery,
-      [title, description, date, file],
+      [name, description, due_date, filename],
       (err, result) => {
         if (err) {
           console.error('Failed to execute query:', err);

@@ -3,6 +3,8 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 
 void main() {
   runApp(MyApp());
@@ -16,7 +18,7 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.blue,
       ),
-      initialRoute: '/home',
+      initialRoute: '/',
       routes: {
         '/': (context) => LoginScreen(),
         '/register': (context) => RegistrationScreen(),
@@ -66,7 +68,7 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   Future<bool> authenticateUser(String email, String password) async {
-    Uri url = Uri.parse('http://localhost:3007/api/user/authenticate');
+    Uri url = Uri.parse('http://localhost:3000/api/user/authenticate');
 
     Map<String, String> headers = {'Content-Type': 'application/json'};
     Map<String, dynamic> body = {'email': email, 'password': password};
@@ -140,7 +142,7 @@ class _RegistrationScreenState extends State<RegistrationScreen> {
   final TextEditingController _passwordController = TextEditingController();
 
   Future<void> registerUser() async {
-    final url = Uri.parse('http://localhost:3007/api/register');
+    final url = Uri.parse('http://localhost:3000/api/register');
     final response = await http.post(
       url,
       body: jsonEncode({
@@ -243,16 +245,20 @@ class _HomePageScreenState extends State<HomePageScreen> {
   }
 
   Future<void> fetchTasks() async {
-    // Fetch tasks from the server
-    final response = await http.get(Uri.parse('http://localhost:3000/tasks'));
+    try {
+      // Fetch tasks from the server
+      final response = await http.get(Uri.parse('http://localhost:3000/tasks'));
 
-    if (response.statusCode == 200) {
-      final List<dynamic> taskData = jsonDecode(response.body);
-      setState(() {
-        tasks = taskData.map((task) => task['title'] as String).toList();
-      });
-    } else {
-      print('Failed to fetch tasks: ${response.statusCode}');
+      if (response.statusCode == 200) {
+        final List<dynamic> taskData = jsonDecode(response.body);
+        setState(() {
+          tasks = taskData.map((task) => task['title'] as String).toList();
+        });
+      } else {
+        print('Failed to fetch tasks: ${response.statusCode}');
+      }
+    } catch (error) {
+      print('Error occurred while fetching tasks: $error');
     }
   }
 
@@ -296,10 +302,30 @@ class _HomePageScreenState extends State<HomePageScreen> {
               },
             ),
           ),
-        ],
-      ),
-    );
-  }
+          Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: ElevatedButton(
+            onPressed: () {
+              // Navigate to the AddTaskScreen
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => AddTaskScreen(),
+                ),
+              ).then((result) {
+                // Refresh the task list if a new task was added
+                if (result != null && result) {
+                  fetchTasks();
+                }
+              });
+            },
+            child: Text('Add Task'),
+          ),
+        ),
+      ],
+    ),
+  );
+}
 }
 
 class AddTaskScreen extends StatefulWidget {
@@ -308,46 +334,48 @@ class AddTaskScreen extends StatefulWidget {
 }
 
 class _AddTaskScreenState extends State<AddTaskScreen> {
-  TextEditingController titleController = TextEditingController();
-  TextEditingController descriptionController = TextEditingController();
-  TextEditingController dateController = TextEditingController();
-  File? selectedFile; // Store the selected file
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _descriptionController = TextEditingController();
+  DateTime _selectedDate = DateTime.now(); // Initialize with current date
 
-  Future<void> addTask() async {
-    final String url = 'http://localhost:3000/tasks';
+  void addTask() async {
+    final String name = _nameController.text;
+    final String description = _descriptionController.text;
+    final String dueDate = _selectedDate?.toString() ?? '';
 
-    final Map<String, String> taskData = {
-      'title': titleController.text,
-      'description': descriptionController.text,
-      'date': dateController.text,
-    };
-
-    final http.MultipartRequest request = http.MultipartRequest('POST', Uri.parse(url));
-    request.fields.addAll(taskData);
-
-    if (selectedFile != null) {
-      request.files.add(
-        await http.MultipartFile.fromPath('file', selectedFile!.path),
-      );
-    }
-
-    final http.StreamedResponse response = await request.send();
+    final response = await http.post(
+      Uri.parse('http://localhost:3000/api/tasks'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'name': name,
+        'description': description,
+        'due_date': dueDate,
+      }),
+    );
 
     if (response.statusCode == 201) {
-      // Task added successfully
-      Navigator.pop(context, true); // Go back to the previous screen
+      final responseData = jsonDecode(response.body);
+      final taskId = responseData['taskId'];
+
+      // Perform any necessary actions after adding the task, such as showing a success message or navigating back to the task list
+      print('Task added successfully! Task ID: $taskId');
     } else {
-      // Failed to add task
       print('Failed to add task: ${response.statusCode}');
     }
   }
 
-  Future<void> selectFile() async {
-    final FilePickerResult? result = await FilePicker.platform.pickFiles();
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? DateTime.now(),
+      firstDate: DateTime(2022),
+      lastDate: DateTime(2030),
+    );
 
-    if (result != null) {
+    if (picked != null && picked != _selectedDate) {
       setState(() {
-        selectedFile = File(result.files.single.path!);
+        _selectedDate = picked;
       });
     }
   }
@@ -360,63 +388,66 @@ class _AddTaskScreenState extends State<AddTaskScreen> {
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Title:',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            TextField(
-              controller: titleController,
-              decoration: InputDecoration(
-                hintText: 'Enter the task title',
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: InputDecoration(
+                  labelText: 'Name',
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a name';
+                  }
+                  return null;
+                },
               ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Description:',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            TextField(
-              controller: descriptionController,
-              decoration: InputDecoration(
-                hintText: 'Enter the task description',
+              SizedBox(height: 16.0),
+              TextFormField(
+                controller: _descriptionController,
+                decoration: InputDecoration(
+                  labelText: 'Description',
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a description';
+                  }
+                  return null;
+                },
               ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Date:',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            TextField(
-              controller: dateController,
-              decoration: InputDecoration(
-                hintText: 'Enter the task date',
+              SizedBox(height: 16.0),
+              InkWell(
+                onTap: () => _selectDate(context),
+                child: InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: 'Due Date',
+                  ),
+                  child: Text(
+                    _selectedDate != null
+                        ? DateFormat('yyyy-MM-dd').format(_selectedDate)
+                        : 'Select Date',
+                  ),
+                ),
               ),
-            ),
-            SizedBox(height: 16),
-            Text(
-              'File:',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-            ),
-            ElevatedButton(
-              onPressed: selectFile,
-              child: Text('Select File'),
-            ),
-            if (selectedFile != null) Text(selectedFile!.path),
-            SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: addTask,
-              child: Text('Add Task'),
-            ),
-          ],
+              SizedBox(height: 16.0),
+              ElevatedButton(
+                onPressed: () {
+                  if (_formKey.currentState!.validate()) {
+                    addTask();
+                  }
+                },
+                child: Text('Add Task'),
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 }
-
 class EditTaskScreen extends StatefulWidget {
   final String taskId;
 
